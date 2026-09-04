@@ -29,10 +29,7 @@ src/ directory. Do the following:
 
 1. In charmcraft.yaml: change name to ${charm_name}-evolved and title
    accordingly. Leave all other fields (containers, resources, requires,
-   config, actions, platforms) unchanged. **Remove the `soul-and-prompts`
-   part** from the `parts` block (if present) — the evolved charm doesn't
-   use the failure agent or self-update loop, so it doesn't need SOUL.md
-   or prompts/. Keep the `charm` part unchanged.
+   config, actions, platforms, parts) unchanged.
 2. In pyproject.toml: change the project name to "${charm_name}-evolved".
    Replace the entire dependencies list with just ops — the evolved charm
    only imports ops, so any base charm dependencies (e.g.

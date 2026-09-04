@@ -36,7 +36,6 @@ cp "$tmp_dir/base-charm/charmcraft.yaml" "${dest}/"
 cp "$tmp_dir/base-charm/pyproject.toml" "${dest}/"
 cp "$tmp_dir/base-charm/uv.lock" "${dest}/"
 [ -f "$tmp_dir/base-charm/tox.ini" ] && cp "$tmp_dir/base-charm/tox.ini" "${dest}/"
-[ -f "$tmp_dir/base-charm/SOUL.md" ] && cp "$tmp_dir/base-charm/SOUL.md" "${dest}/"
 [ -d "$tmp_dir/base-charm/prompts" ] && cp -r "$tmp_dir/base-charm/prompts" "${dest}/"
 [ -d "$tmp_dir/base-charm/tests" ] && cp -r "$tmp_dir/base-charm/tests" "${dest}/"
 
