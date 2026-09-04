@@ -17,6 +17,9 @@ permissions:
 
 jobs:
   evaluate:
+    # Bug reports (see .github/ISSUE_TEMPLATE/bug_report.yml) are handled by
+    # the bug-report workflow instead.
+    if: "!contains(github.event.issue.labels.*.name, 'bug')"
     runs-on: ubuntu-latest
     env:
       OPENCODE_VERSION: '1.18.16'

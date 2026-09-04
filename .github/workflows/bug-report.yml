@@ -4,7 +4,8 @@ name: Triage charm bug reports
 # .github/ISSUE_TEMPLATE/bug_report.yml, which tags these issues with the
 # "bug" label). An agent investigates the report, comments a plan on the
 # issue, and either opens a PR with a fix (with auto-merge enabled) or
-# closes the issue as not planned.
+# closes the issue as not planned. The begin-charm workflow filters these
+# issues out, so only one of the two workflows acts on any given issue.
 on:
   issues:
     types: [opened]
