@@ -1,0 +1,47 @@
+name: Charm bug report
+description: Report a bug in one of the charms that live under charms/ in this repository.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! This will be picked up automatically by
+        an agent that will investigate, comment a plan on this issue, and
+        open a PR with a fix (or close the issue if no change is needed).
+  - type: input
+    id: charm-name
+    attributes:
+      label: Charm name
+      description: >
+        The name of the charm, i.e. the directory name under `charms/`
+        (for example, for `charms/mycharm/` enter `mycharm`).
+      placeholder: mycharm
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: >
+        Describe the bug in as much detail as possible: what you did, what
+        you expected, and what actually happened. Include relevant config,
+        logs, or Juju status output. You can drag and drop files (such as
+        log files) directly into this box to attach them.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: false
+  - type: input
+    id: charm-version
+    attributes:
+      label: Charm version (optional)
+      description: >
+        The value of this charm's `version` file / release tag, if known
+        (for example, `mycharm-3`).
+    validations:
+      required: false

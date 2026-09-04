@@ -1,0 +1,58 @@
+name: Triage charm bug reports
+
+# Triggers when a bug-report issue is opened (see
+# .github/ISSUE_TEMPLATE/bug_report.yml, which tags these issues with the
+# "bug" label). An agent investigates the report, comments a plan on the
+# issue, and either opens a PR with a fix (with auto-merge enabled) or
+# closes the issue as not planned.
+on:
+  issues:
+    types: [opened]
+
+concurrency:
+  group: bug-report-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  triage:
+    if: contains(github.event.issue.labels.*.name, 'bug')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Extract charm name from issue
+        id: charm
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: .github/scripts/extract-charm-name.sh
+
+      - name: Close issue if charm does not exist
+        if: steps.charm.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          CHARM_NAME: ${{ steps.charm.outputs.name }}
+        run: .github/scripts/close-unknown-charm.sh
+
+      - name: Install opencode
+        if: steps.charm.outputs.exists == 'true'
+        run: sudo snap install opencode --classic
+
+      - name: Resolve bug report with opencode
+        if: steps.charm.outputs.exists == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_PR_TOKEN: ${{ secrets.GH_PR_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          CHARM_NAME: ${{ steps.charm.outputs.name }}
+          REPO: ${{ github.repository }}
+        run: .github/scripts/run-bug-agent.sh
