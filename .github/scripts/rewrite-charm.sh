@@ -81,7 +81,8 @@ TIMEOUT=300 \
   bash "$(dirname "$0")/run-agent.sh"
 
 # Verify the agent only modified files under the charm directory.
-changed="$(cd "$repo_root" && git status --porcelain | awk '{print $2}')"
+# Use --untracked-files=all so git lists individual files, not just "charms/".
+changed="$(cd "$repo_root" && git status --porcelain --untracked-files=all | awk '{print $2}')"
 changed_outside=""
 for path in $changed; do
   case "$path" in

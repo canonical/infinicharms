@@ -69,7 +69,8 @@ TIMEOUT=180 \
   bash "$(dirname "$0")/run-agent.sh"
 
 # Verify the agent only modified files under the evolved directory.
-changed="$(cd "$repo_root" && git status --porcelain | awk '{print $2}')"
+# Use --untracked-files=all so git lists individual files, not just the parent dir.
+changed="$(cd "$repo_root" && git status --porcelain --untracked-files=all | awk '{print $2}')"
 changed_outside=""
 for path in $changed; do
   case "$path" in
