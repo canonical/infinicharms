@@ -1,0 +1,5 @@
+# Blank issues are kept enabled because requesting a new charm (or a new
+# feature for an existing one) doesn't have a dedicated template yet --
+# those are picked up by the begin-charm workflow, which evaluates any
+# opened issue that isn't tagged "bug" by the bug report template.
+blank_issues_enabled: true
