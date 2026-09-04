@@ -45,7 +45,9 @@ src/ directory. Do the following:
    charm modules. Be careful to produce valid TOML — do not leave stray
    lines or trailing commas.
 3. Write src/charm.py from scratch as a minimal charm:
-   - Define a class ${pascal}EvolvedCharm(ops.CharmBase).
+   - Include a module docstring (e.g. """Charm the application.""").
+   - Define a class ${pascal}EvolvedCharm(ops.CharmBase) with a class
+     docstring (e.g. """Charm the application.""").
    - In __init__, observe these lifecycle events: install, start,
      config_changed, update_status, upgrade_charm, collect_unit_status.
      Also observe the shape-specific events: one observer per relation
