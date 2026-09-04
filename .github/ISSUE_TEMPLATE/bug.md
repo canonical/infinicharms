@@ -3,6 +3,7 @@ name: Bug
 about: Report a bug in one of the charms that live under charms/ in this repository.
 title: "[Bug] "
 labels: ["bug"]
+type: "Bug"
 ---
 
 <!--
