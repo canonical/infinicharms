@@ -73,7 +73,7 @@ changed="$(cd "$repo_root" && git status --porcelain | awk '{print $2}')"
 changed_outside=""
 for path in $changed; do
   case "$path" in
-    ${evolved_dir}/*) ;;
+    ${evolved_dir}/*|${evolved_dir}) ;;
     *) changed_outside="${changed_outside}${path}"$'\n' ;;
   esac
 done
