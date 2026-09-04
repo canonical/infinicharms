@@ -27,7 +27,7 @@ jobs:
     env:
       OPENCODE_VERSION: '1.18.16'
       BASE_CHARM_REPO: 'canonical/infinicharms-base'
-      BASE_CHARM_REF: 'tromai-init-base-charm'
+      BASE_CHARM_REF: 'main'
       BASE_CHARM_VERSION: '0.0.1'
     steps:
       - name: Checkout
