@@ -46,6 +46,9 @@ response=$(AGENT_NAME=parse-issue \
   TIMEOUT=60 \
   bash "$(dirname "$0")/run-agent.sh")
 
+# Strip markdown code fences if the agent wrapped the JSON in ```json ... ```.
+response="$(echo "$response" | sed '/^```/d')"
+
 # Validate JSON.
 if ! echo "$response" | jq -e . > /dev/null 2>&1; then
   echo "::error::Agent did not return valid JSON." >&2
