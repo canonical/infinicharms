@@ -1,0 +1,96 @@
+# This file configures Charmcraft.
+# See https://documentation.ubuntu.com/charmcraft/stable/reference/files/charmcraft-yaml-file/
+type: charm
+name: myblog
+title: Myblog
+summary: A simple web server charm.
+description: |
+  The myblog charm operates a simple web server.
+
+  It manages the web server in a container, with the OCI image specified at
+  deploy-time, and requires a PostgreSQL database for persistence.
+
+  The port the web server listens on is configurable.
+
+base: ubuntu@24.04
+platforms:
+  amd64:
+  arm64:
+
+assumes:
+  - juju >= 3.6
+
+containers:
+  webserver:
+    resource: oci-image
+
+resources:
+  oci-image:
+    type: oci-image
+    description: OCI image for the web server
+
+requires:
+  database:
+    interface: postgresql_client
+
+config:
+  options:
+    port:
+      type: int
+      default: 8080
+      description: Port the web server listens on; mapped to SERVER_PORT in the container.
+    monorepo:
+      type: string
+      description: |
+        owner/repo of the InfiniCharms monorepo, used for creating issues and
+        fetching releases (e.g. "acme/infinicharms").
+    charm-name:
+      type: string
+      description: |
+        Subdir/charm name in the monorepo. Scopes which releases apply to this
+        unit and labels filed issues (e.g. "boo").
+    github-token:
+      type: string
+      description: |
+        Fine-grained GitHub token (monorepo-scoped) used by the failure agent to
+        create issues via the gh CLI. Sensitive.
+    llm-api-token:
+      type: string
+      description: |
+        API token for the failure agent's LLM summarization step (optional). If
+        unset, the agent falls back to templated issues. Sensitive.
+    llm-model:
+      type: string
+      default: "z-ai/glm-5.3-flash"
+      description: |
+        Model used for failure summarization.
+    llm-base-url:
+      type: string
+      default: "https://openrouter.ai/api/v1"
+      description: |
+        Base URL of the OpenAI-compatible LLM endpoint.
+    auto-update:
+      type: boolean
+      default: true
+      description: Whether to self-patch from the latest matching release.
+    log-level:
+      type: string
+      default: "info"
+      description: |
+        Log level for the charm. One of: "debug", "info", "warning", "error",
+        "critical".
+
+parts:
+  charm:
+    plugin: uv
+    source: .
+    build-snaps:
+      - astral-uv
+
+actions:
+  agent-status:
+    description: |
+      Report the failure agent's most recent outcome (did it file/comment/skip/
+      fail an issue, and why), plus the most recent hook failure it saw. This
+      reads the persisted `.infinicharms/state.json` and makes no changes. Use
+      it to answer "how did the agent do?" without needing `juju ssh`.
