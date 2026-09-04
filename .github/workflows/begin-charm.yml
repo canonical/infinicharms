@@ -1,8 +1,9 @@
 name: Begin charm
 
-# Triggers when an issue is opened. Uses an agent to evaluate the issue
-# and posts the agent's assessment ("Sounds tough!" or "Sounds easy!")
-# back as a comment.
+# Triggers when an issue is opened. Runs the ON_CHARM_REQUEST.md pipeline:
+# parses the issue into a charm spec, fetches the base charm, rewrites it for
+# the spec, packs both the charm and its evolved variant, commits, and creates
+# a GitHub release with the two .charm files.
 on:
   issues:
     types:
@@ -13,19 +14,25 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  contents: write
   issues: write
 
 jobs:
-  evaluate:
+  generate:
     # Bug reports (see .github/ISSUE_TEMPLATE/bug_report.yml) are handled by
     # the bug-report workflow instead.
     if: "!contains(github.event.issue.labels.*.name, 'bug')"
     runs-on: ubuntu-latest
     env:
       OPENCODE_VERSION: '1.18.16'
+      BASE_CHARM_REPO: 'canonical/infinicharms-base'
+      BASE_CHARM_REF: 'tromai-init-base-charm'
+      BASE_CHARM_VERSION: '0.0.1'
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Disable git hooks
         run: git config core.hooksPath /dev/null
@@ -38,17 +45,200 @@ jobs:
       - name: Install OpenCode
         run: npm install -g "opencode-ai@${OPENCODE_VERSION}"  # zizmor: ignore[adhoc-packages] pinned version, no lockfile available for global npm installs
 
-      - name: Evaluate issue
-        id: evaluate
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+
+      - name: Install ruff
+        run: uv tool install ruff
+
+      - name: Set up LXD
+        uses: canonical/setup-lxd@main
+
+      - name: Install charmcraft
+        run: sudo snap install charmcraft --classic
+
+      # Step 1: Parse the issue into a charm spec.
+      - name: Parse issue
+        id: parse
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           REPO_ROOT: ${{ github.workspace }}
-        run: .github/scripts/evaluate-issue.sh
+        run: .github/scripts/parse-issue.sh
 
-      - name: Comment on issue
+      # Step 2: Abort if the charm name is already taken.
+      - name: Check name not taken
+        id: check-name
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
-          COMMENT_BODY: ${{ steps.evaluate.outputs.response }}
-        run: .github/scripts/comment-on-issue.sh
+          CHARM_NAME: ${{ steps.parse.outputs.name }}
+        run: |
+          set -euo pipefail
+          if [ -d "charms/${CHARM_NAME}" ]; then
+            gh issue comment "$ISSUE_NUMBER" --body "A charm named \`${CHARM_NAME}\` already exists; aborting."
+            echo "aborted=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "aborted=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Steps 3-4: Create the charm directory and write purpose.md.
+      - name: Create charm directory
+        if: steps.check-name.outcome == 'success' && steps.check-name.outputs.aborted != 'true'
+        env:
+          CHARM_NAME: ${{ steps.parse.outputs.name }}
+          PURPOSE: ${{ steps.parse.outputs.purpose }}
+        run: |
+          mkdir -p "charms/${CHARM_NAME}"
+          printf '%s\n' "$PURPOSE" > "charms/${CHARM_NAME}/purpose.md"
+
+      # Steps 5-7: Fetch the base charm source and write base-version.
+      - name: Fetch base charm
+        id: fetch
+        if: steps.check-name.outcome == 'success' && steps.check-name.outputs.aborted != 'true'
+        env:
+          BASE_CHARM_REPO: ${{ env.BASE_CHARM_REPO }}
+          BASE_CHARM_REF: ${{ env.BASE_CHARM_REF }}
+          BASE_CHARM_VERSION: ${{ env.BASE_CHARM_VERSION }}
+          CHARM_DIR: charms/${{ steps.parse.outputs.name }}
+          REPO_ROOT: ${{ github.workspace }}
+        run: .github/scripts/fetch-base-charm.sh
+
+      # Step 8: Rewrite charmcraft.yaml, pyproject.toml, and observers.
+      - name: Rewrite charm
+        id: rewrite
+        if: steps.check-name.outcome == 'success' && steps.check-name.outputs.aborted != 'true'
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          REPO_ROOT: ${{ github.workspace }}
+          CHARM_NAME: ${{ steps.parse.outputs.name }}
+          CHARM_DIR: charms/${{ steps.parse.outputs.name }}
+          SPEC_JSON: ${{ steps.parse.outputs.shape }}
+          CHARM_PURPOSE: ${{ steps.parse.outputs.purpose }}
+        run: .github/scripts/rewrite-charm.sh
+
+      # Step 9: Regenerate the lockfile.
+      - name: Regenerate lockfile
+        if: steps.check-name.outcome == 'success' && steps.check-name.outputs.aborted != 'true'
+        env:
+          CHARM_NAME: ${{ steps.parse.outputs.name }}
+        run: |
+          cd "charms/${CHARM_NAME}" && uv lock
+
+      # Step 10: Format, lint, and pack the charm.
+      - name: Pack charm
+        id: pack-base
+        if: steps.check-name.outcome == 'success' && steps.check-name.outputs.aborted != 'true'
+        env:
+          CHARM_NAME: ${{ steps.parse.outputs.name }}
+        run: |
+          cd "charms/${CHARM_NAME}"
+          ruff format src/
+          ruff check src/ --fix
+          CHARM_DIR="${{ github.workspace }}/charms/${CHARM_NAME}" \
+          ARTIFACT_NAME="${CHARM_NAME}" \
+            bash "$GITHUB_WORKSPACE/.github/scripts/pack-charm.sh"
+
+      # Step 11: Create the _evolved subdirectory and copy files.
+      - name: Create _evolved
+        if: steps.check-name.outcome == 'success' && steps.check-name.outputs.aborted != 'true'
+        env:
+          CHARM_NAME: ${{ steps.parse.outputs.name }}
+        run: |
+          set -euo pipefail
+          charm_dir="charms/${CHARM_NAME}"
+          evolved_dir="${charm_dir}/_evolved"
+          mkdir -p "${evolved_dir}/src"
+          cp "${charm_dir}/charmcraft.yaml" "${evolved_dir}/"
+          cp "${charm_dir}/pyproject.toml" "${evolved_dir}/"
+          cp "${charm_dir}/uv.lock" "${evolved_dir}/"
+
+      # Step 12: Evolve the charm.
+      - name: Evolve charm
+        id: evolve
+        if: steps.check-name.outcome == 'success' && steps.check-name.outputs.aborted != 'true'
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          REPO_ROOT: ${{ github.workspace }}
+          CHARM_NAME: ${{ steps.parse.outputs.name }}
+          EVOLVED_DIR: charms/${{ steps.parse.outputs.name }}/_evolved
+        run: .github/scripts/evolve-charm.sh
+
+      # Step 13: Regenerate the evolved lockfile.
+      - name: Regenerate evolved lockfile
+        if: steps.check-name.outcome == 'success' && steps.check-name.outputs.aborted != 'true'
+        env:
+          CHARM_NAME: ${{ steps.parse.outputs.name }}
+        run: |
+          cd "charms/${CHARM_NAME}/_evolved" && uv lock
+
+      # Step 14: Format, lint, and pack the evolved charm.
+      - name: Pack evolved charm
+        id: pack-evolved
+        if: steps.check-name.outcome == 'success' && steps.check-name.outputs.aborted != 'true'
+        env:
+          CHARM_NAME: ${{ steps.parse.outputs.name }}
+        run: |
+          cd "charms/${CHARM_NAME}/_evolved"
+          ruff format src/
+          ruff check src/ --fix
+          CHARM_DIR="${{ github.workspace }}/charms/${CHARM_NAME}/_evolved" \
+          ARTIFACT_NAME="${CHARM_NAME}-evolved" \
+            bash "$GITHUB_WORKSPACE/.github/scripts/pack-charm.sh"
+
+      # Step 15: Write the version file.
+      - name: Write version
+        if: steps.check-name.outcome == 'success' && steps.check-name.outputs.aborted != 'true'
+        env:
+          CHARM_NAME: ${{ steps.parse.outputs.name }}
+        run: printf '1\n' > "charms/${CHARM_NAME}/version"
+
+      # Step 16: Commit and push the charm files.
+      - name: Commit charm files
+        id: commit
+        if: steps.check-name.outcome == 'success' && steps.check-name.outputs.aborted != 'true'
+        run: |
+          set -euo pipefail
+          # Ensure .charm files and ruff caches are gitignored.
+          grep -q 'charms/\*/\*.charm' .gitignore 2>/dev/null || {
+            printf 'charms/*/*.charm\ncharms/*/_evolved/*.charm\ncharms/*/.ruff_cache/\ncharms/*/_evolved/.ruff_cache/\n' >> .gitignore
+          }
+          git add .gitignore charms/${{ steps.parse.outputs.name }}/
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m "Add charm ${{ steps.parse.outputs.name }} (and ${{ steps.parse.outputs.name }}-evolved)"
+          git push
+          echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Step 17: Stage packed charms and create the GitHub release.
+      - name: Create release
+        id: release
+        if: steps.check-name.outcome == 'success' && steps.check-name.outputs.aborted != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHARM_NAME: ${{ steps.parse.outputs.name }}
+          CHARM_VERSION: '1'
+        run: |
+          set -euo pipefail
+          mkdir -p dist/${CHARM_NAME} dist/${CHARM_NAME}-evolved
+          cp charms/${CHARM_NAME}/*.charm dist/${CHARM_NAME}/
+          cp charms/${CHARM_NAME}/_evolved/*.charm dist/${CHARM_NAME}-evolved/
+          bash "$GITHUB_WORKSPACE/.github/scripts/publish-release.sh"
+
+      # Step 18: Comment on the issue.
+      - name: Comment on issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.check-name.outputs.aborted }}" = "true" ]; then
+            exit 0
+          fi
+          if [ "${{ steps.release.outcome }}" = "success" ]; then
+            body="Generated charm \`${{ steps.parse.outputs.name }}\` (and \`${{ steps.parse.outputs.name }}-evolved\`) and released as [\`${{ steps.parse.outputs.name }}-1\`](https://github.com/${{ github.repository }}/releases/tag/${{ steps.parse.outputs.name }}-1)."
+          else
+            body="The charm generation workflow failed. Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
+          fi
+          gh issue comment "$ISSUE_NUMBER" --body "$body"
