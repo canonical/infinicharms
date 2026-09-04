@@ -13,25 +13,14 @@ with a fix (or close the issue if no change is needed).
 
 ### Charm name
 
-<!--
-The name of the charm, i.e. the directory name under `charms/` (for
-example, for `charms/mycharm/` enter `mycharm`).
--->
+
 
 ### What happened?
 
-<!--
-Describe the bug in as much detail as possible: what you did, what you
-expected, and what actually happened. Include relevant config, logs, or
-Juju status output. You can drag and drop files (such as log files)
-directly into this comment to attach them.
--->
+
 
 ### What did you expect to happen?
 
-### Charm version (optional)
 
-<!--
-The value of this charm's `version` file / release tag, if known (for
-example, `mycharm-3`).
--->
+
+### Charm version (optional)
