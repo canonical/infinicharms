@@ -1,0 +1,29 @@
+name: Begin charm
+
+# Triggers when an issue is opened. Posts a comment back to the issue to
+# confirm the workflow is wired up.
+on:
+  issues:
+    types:
+      - opened
+
+concurrency:
+  group: begin-charm-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+permissions:
+  issues: write
+
+jobs:
+  acknowledge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Comment on issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          COMMENT_BODY: "Received!"
+        run: .github/scripts/comment-on-issue.sh
