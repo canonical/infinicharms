@@ -1,0 +1,4 @@
+charms/*/*.charm
+charms/*/_evolved/*.charm
+charms/*/.ruff_cache/
+charms/*/_evolved/.ruff_cache/
