@@ -1,7 +1,8 @@
 name: Begin charm
 
-# Triggers when an issue is opened. Posts a comment back to the issue to
-# confirm the workflow is wired up.
+# Triggers when an issue is opened. Uses an agent to evaluate the issue
+# and posts the agent's assessment ("Sounds tough!" or "Sounds easy!")
+# back as a comment.
 on:
   issues:
     types:
@@ -15,15 +16,36 @@ permissions:
   issues: write
 
 jobs:
-  acknowledge:
+  evaluate:
     runs-on: ubuntu-latest
+    env:
+      OPENCODE_VERSION: '1.18.16'
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Disable git hooks
+        run: git config core.hooksPath /dev/null
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Install OpenCode
+        run: npm install -g "opencode-ai@${OPENCODE_VERSION}"  # zizmor: ignore[adhoc-packages] pinned version, no lockfile available for global npm installs
+
+      - name: Evaluate issue
+        id: evaluate
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          REPO_ROOT: ${{ github.workspace }}
+        run: .github/scripts/evaluate-issue.sh
 
       - name: Comment on issue
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
-          COMMENT_BODY: "Received!"
+          COMMENT_BODY: ${{ steps.evaluate.outputs.response }}
         run: .github/scripts/comment-on-issue.sh
