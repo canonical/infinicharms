@@ -1,0 +1,113 @@
+name: Release changed charms
+
+# Triggers once a PR is merged (i.e. a push lands on `main`). The bump-versions
+# job commits its version bumps using the default GITHUB_TOKEN, which GitHub
+# does not use to re-trigger workflow runs, so that commit does not cause an
+# infinite loop.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'charms/**'
+
+concurrency:
+  group: release-changed-charms
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  bump-versions:
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.bump.outputs.has_changes }}
+      commit_sha: ${{ steps.bump.outputs.commit_sha }}
+      build_matrix: ${{ steps.bump.outputs.build_matrix }}
+      release_matrix: ${{ steps.bump.outputs.release_matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Bump versions of changed charms
+        id: bump
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+          TARGET_BRANCH: ${{ github.ref_name }}
+        run: .github/scripts/bump-changed-charms.sh
+
+  # Each changed charm maps to two buildable charms: charms/<name> and
+  # charms/<name>/_evolved. They are packed independently (in parallel) here.
+  build:
+    needs: bump-versions
+    if: needs.bump-versions.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        charm: ${{ fromJson(needs.bump-versions.outputs.build_matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.bump-versions.outputs.commit_sha }}
+
+      - name: Set up LXD
+        uses: canonical/setup-lxd@main
+
+      - name: Install charmcraft
+        run: sudo snap install charmcraft --classic
+
+      - name: Pack ${{ matrix.charm.artifact }}
+        id: pack
+        env:
+          CHARM_DIR: ${{ matrix.charm.dir }}
+          ARTIFACT_NAME: ${{ matrix.charm.artifact }}
+        run: .github/scripts/pack-charm.sh
+
+      - name: Upload ${{ matrix.charm.artifact }} artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.charm.artifact }}
+          path: ${{ steps.pack.outputs.charm_path }}
+          if-no-files-found: error
+
+  # Combines the base + _evolved artifacts for each changed charm back
+  # together into a single release, tagged <name>-<version>.
+  release:
+    needs: [bump-versions, build]
+    if: needs.bump-versions.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        charm: ${{ fromJson(needs.bump-versions.outputs.release_matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.bump-versions.outputs.commit_sha }}
+
+      - name: Download base charm artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ matrix.charm.name }}
+          path: dist/${{ matrix.charm.name }}
+
+      - name: Download evolved charm artifact
+        if: matrix.charm.has_evolved
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ matrix.charm.name }}-evolved
+          path: dist/${{ matrix.charm.name }}-evolved
+
+      - name: Publish release for ${{ matrix.charm.name }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHARM_NAME: ${{ matrix.charm.name }}
+          CHARM_VERSION: ${{ matrix.charm.version }}
+        run: .github/scripts/publish-release.sh
