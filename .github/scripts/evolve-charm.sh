@@ -62,6 +62,9 @@ beyond ops. The evolved charm is a fresh, minimal standalone charm.
 Only modify files under ${evolved_dir}/.
 PROMPT_EOF
 
+# Record the set of changed files before the agent runs.
+before="$(cd "$repo_root" && git status --porcelain --untracked-files=all | awk '{print $2}' | sort)"
+
 # Run the agent (180s timeout — writes charm.py from scratch + edits 2 files).
 AGENT_NAME=evolve-charm \
 PROMPT_FILE="$prompt_file" \
@@ -69,10 +72,11 @@ TIMEOUT=180 \
   bash "$(dirname "$0")/run-agent.sh"
 
 # Verify the agent only modified files under the evolved directory.
-# Use --untracked-files=all so git lists individual files, not just the parent dir.
-changed="$(cd "$repo_root" && git status --porcelain --untracked-files=all | awk '{print $2}')"
+# Compare against the state before the agent ran to isolate agent changes.
+after="$(cd "$repo_root" && git status --porcelain --untracked-files=all | awk '{print $2}' | sort)"
+new_changes="$(comm -13 <(echo "$before") <(echo "$after"))"
 changed_outside=""
-for path in $changed; do
+for path in $new_changes; do
   case "$path" in
     ${evolved_dir}/*|${evolved_dir}) ;;
     *) changed_outside="${changed_outside}${path}"$'\n' ;;

@@ -74,6 +74,9 @@ Issue shape: ${spec_json}
 Only modify files under ${charm_dir}/.
 PROMPT_EOF
 
+# Record the set of changed files before the agent runs.
+before="$(cd "$repo_root" && git status --porcelain --untracked-files=all | awk '{print $2}' | sort)"
+
 # Run the agent (300s timeout — reads + edits 3 files).
 AGENT_NAME=rewrite-charm \
 PROMPT_FILE="$prompt_file" \
@@ -81,10 +84,11 @@ TIMEOUT=300 \
   bash "$(dirname "$0")/run-agent.sh"
 
 # Verify the agent only modified files under the charm directory.
-# Use --untracked-files=all so git lists individual files, not just "charms/".
-changed="$(cd "$repo_root" && git status --porcelain --untracked-files=all | awk '{print $2}')"
+# Compare against the state before the agent ran to isolate agent changes.
+after="$(cd "$repo_root" && git status --porcelain --untracked-files=all | awk '{print $2}' | sort)"
+new_changes="$(comm -13 <(echo "$before") <(echo "$after"))"
 changed_outside=""
-for path in $changed; do
+for path in $new_changes; do
   case "$path" in
     ${charm_dir}/*|${charm_dir}) ;;
     *) changed_outside="${changed_outside}${path}"$'\n' ;;
