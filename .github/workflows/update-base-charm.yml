@@ -1,0 +1,122 @@
+name: Update base charm
+
+# Manually triggered. Fetches the latest changes from the upstream base
+# charm template (canonical/infinicharms-base) and updates an existing
+# generated charm under charms/<charm_name> to incorporate them, while
+# preserving the charm-specific customizations added by the begin-charm
+# workflow (its shape, config/actions, and its independent _evolved
+# implementation). Pushes the result directly to the branch this workflow
+# ran on once the agent completes successfully.
+on:
+  workflow_dispatch:
+    inputs:
+      charm_name:
+        description: 'Name of the charm under charms/ to update (e.g. myblog)'
+        required: true
+        type: string
+      base_ref:
+        description: 'Branch, tag, or commit of canonical/infinicharms-base to update to'
+        required: false
+        default: 'main'
+        type: string
+      base_version:
+        description: 'Version string to record for the new base (e.g. 0.0.2)'
+        required: true
+        type: string
+
+concurrency:
+  group: update-base-charm-${{ inputs.charm_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    env:
+      BASE_CHARM_REPO: 'canonical/infinicharms-base'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Disable git hooks
+        run: git config core.hooksPath /dev/null
+
+      - name: Validate charm exists
+        env:
+          CHARM_NAME: ${{ inputs.charm_name }}
+        run: |
+          set -euo pipefail
+          if [ ! -f "charms/${CHARM_NAME}/base-version" ]; then
+            echo "::error::charms/${CHARM_NAME}/base-version not found; is '${CHARM_NAME}' a generated charm?" >&2
+            exit 1
+          fi
+
+      - name: Install opencode
+        run: sudo snap install opencode --classic
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+
+      - name: Install ruff
+        run: uv tool install ruff
+
+      - name: Set up LXD
+        uses: canonical/setup-lxd@main
+
+      - name: Install charmcraft
+        run: sudo snap install charmcraft --classic
+
+      # Prepares full old/new checkouts of the base charm repo plus a diff
+      # between them, for the agent to use as context.
+      - name: Fetch base charm diff
+        id: diff
+        env:
+          BASE_CHARM_REPO: ${{ env.BASE_CHARM_REPO }}
+          BASE_CHARM_REF: ${{ inputs.base_ref }}
+          CHARM_NAME: ${{ inputs.charm_name }}
+          REPO_ROOT: ${{ github.workspace }}
+        run: .github/scripts/fetch-base-charm-diff.sh
+
+      # Hands off to the agent to merge the upstream changes into the charm
+      # directory and verify it still packs. See
+      # .github/prompts/update-base-charm-agent.md for what the agent
+      # actually does. This step also verifies the agent stayed within
+      # charms/<charm_name>/ before letting the next step push anything.
+      - name: Run update agent
+        id: agent
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          REPO_ROOT: ${{ github.workspace }}
+          CHARM_NAME: ${{ inputs.charm_name }}
+          OLD_BASE_VERSION: ${{ steps.diff.outputs.old_base_version }}
+          OLD_BASE_SHA: ${{ steps.diff.outputs.old_base_sha }}
+          NEW_BASE_VERSION: ${{ inputs.base_version }}
+          NEW_BASE_SHA: ${{ steps.diff.outputs.new_sha }}
+          OLD_BASE_DIR: ${{ steps.diff.outputs.old_base_dir }}
+          NEW_BASE_DIR: ${{ steps.diff.outputs.new_base_dir }}
+          DIFF_FILE: ${{ steps.diff.outputs.diff_file }}
+        run: .github/scripts/run-update-base-agent.sh
+
+      # Only pushed if the agent step above completed (and passed its
+      # scope check) successfully.
+      - name: Commit and push changes
+        if: steps.agent.outcome == 'success'
+        env:
+          CHARM_NAME: ${{ inputs.charm_name }}
+          OLD_BASE_VERSION: ${{ steps.diff.outputs.old_base_version }}
+          NEW_BASE_VERSION: ${{ inputs.base_version }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "charms/${CHARM_NAME}/"
+          if git diff --cached --quiet; then
+            echo "No changes to commit; base charm update produced no diff."
+            exit 0
+          fi
+          git commit -m "chore(${CHARM_NAME}): update base charm ${OLD_BASE_VERSION} -> ${NEW_BASE_VERSION}"
+          git push
