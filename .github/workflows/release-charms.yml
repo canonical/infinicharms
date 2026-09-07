@@ -1,15 +1,18 @@
 name: Release changed charms
 
-# Triggers once a PR is merged (i.e. a push lands on `main`). The bump-versions
-# job commits its version bumps using the default GITHUB_TOKEN, which GitHub
-# does not use to re-trigger workflow runs, so that commit does not cause an
-# infinite loop.
+# Triggers once a PR is merged (i.e. a push lands on `main`), or manually via
+# the Actions UI (workflow_dispatch) -- e.g. to retry a release after a
+# failed run, or to catch up if a push was merged before this workflow
+# existed or matched. The bump-versions job commits its version bumps using
+# the default GITHUB_TOKEN, which GitHub does not use to re-trigger workflow
+# runs, so that commit does not cause an infinite loop.
 on:
   push:
     branches:
       - main
     paths:
       - 'charms/**'
+  workflow_dispatch: {}
 
 concurrency:
   group: release-changed-charms
