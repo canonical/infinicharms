@@ -38,7 +38,6 @@ jobs:
       - name: Bump versions of changed charms
         id: bump
         env:
-          BEFORE_SHA: ${{ github.event.before }}
           AFTER_SHA: ${{ github.sha }}
           TARGET_BRANCH: ${{ github.ref_name }}
         run: .github/scripts/bump-changed-charms.sh

@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
-# Detects which charms under charms/ changed in this push, bumps each
-# changed charm's version file, and pushes every bump as a single commit.
+# Detects which charms under charms/ have changed since they were last
+# released, bumps each changed charm's version file, and pushes every bump
+# as a single commit.
+#
+# "Since last released" is determined per charm, from the most recent
+# commit that touched that charm's own version file (written as "1" by
+# begin-charm.yml when the charm is first generated, and bumped by this
+# script on every release after that) -- not from the triggering event's
+# before/after commit range. This matters because that range is only
+# meaningful for ordinary `push` events: it's empty for a manual
+# workflow_dispatch run, and even on a push it can miss changes that
+# landed in an earlier commit that didn't itself trigger a release (e.g. a
+# commit pushed with the default GITHUB_TOKEN, which GitHub does not use
+# to re-trigger `push`-triggered workflows, followed by an unrelated commit
+# that does).
 #
 # Each changed charm actually maps to two buildable charms:
 #   charms/<name>          (the base charm)
@@ -10,9 +23,8 @@
 # single release (tag <name>-<version>) can be published with both.
 #
 # Expects the following environment variables:
-#   BEFORE_SHA    - SHA before the push (github.event.before)
-#   AFTER_SHA     - SHA after the push (github.sha)
-#   TARGET_BRANCH - branch to push the version-bump commit to (github.ref_name)
+#   AFTER_SHA     - commit to evaluate charm state as of (default: HEAD)
+#   TARGET_BRANCH - branch to push the version-bump commit to (default: main)
 #
 # Sets the following step outputs:
 #   has_changes    - "true" if any charm was bumped, "false" otherwise
@@ -24,39 +36,39 @@
 #                     [{"name":"mycharm","version":"2","has_evolved":true}]
 set -euo pipefail
 
-before="${BEFORE_SHA:-}"
 after="${AFTER_SHA:-HEAD}"
 branch="${TARGET_BRANCH:-main}"
 
-# On the very first push to a branch (or a force-push with no common
-# history) github.event.before is all zeros. Fall back to diffing against
-# the parent of the current commit in that case.
-if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
-  before="$(git rev-parse "${after}^" 2>/dev/null || git rev-list --max-parents=0 "$after")"
-fi
-
-echo "Diffing charms/ between ${before} and ${after}"
-
-mapfile -t changed_charms < <(
-  git diff --name-only "$before" "$after" -- charms/ \
-    | awk -F/ 'NF >= 2 { print $2 }' \
-    | sort -u
-)
+after_sha="$(git rev-parse "$after")"
+echo "Checking charms/ for changes as of ${after_sha}"
 
 build_entries=()
 release_entries=()
 bumped_names=()
 
-for name in "${changed_charms[@]}"; do
-  charm_dir="charms/${name}"
-  charmcraft_yaml="${charm_dir}/charmcraft.yaml"
+for charmcraft_yaml in charms/*/charmcraft.yaml; do
+  [ -f "$charmcraft_yaml" ] || continue
+  charm_dir="$(dirname "$charmcraft_yaml")"
+  name="$(basename "$charm_dir")"
+  version_file="${charm_dir}/version"
 
-  if [ ! -f "$charmcraft_yaml" ]; then
-    echo "Skipping '${name}': ${charmcraft_yaml} not found."
-    continue
+  # Find the commit where this charm's version file was last written --
+  # that's the charm's own "last released" point. Diffing from there to
+  # $after_sha tells us whether anything under the charm's directory has
+  # changed since then, regardless of how this workflow run was triggered.
+  last_release_commit="$(git log -1 --format=%H "$after_sha" -- "$version_file" || true)"
+
+  if [ -z "$last_release_commit" ]; then
+    echo "${name}: ${version_file} has no history yet; treating as unreleased."
+  else
+    changed_files="$(git diff --name-only "$last_release_commit" "$after_sha" -- "$charm_dir")"
+    if [ -z "$changed_files" ]; then
+      continue
+    fi
+    echo "${name}: changed since ${last_release_commit:0:12} (last release):"
+    echo "$changed_files" | sed 's/^/    /'
   fi
 
-  version_file="${charm_dir}/version"
   current_version=0
   if [ -f "$version_file" ]; then
     current_version="$(cat "$version_file")"
